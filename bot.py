@@ -78,7 +78,7 @@ def bot_by_html() -> str:
 GLOBAL_SITES_FILE = os.path.join(_BOT_DIR_EARLY, "global_sites.json")
 GLOBAL_MIN_PRICE = 0.01
 GLOBAL_MAX_PRICE = 20.0
-SITE_CHECK_BATCH_SIZE = 50          # sites queued per batch for /site and /addsite
+SITE_CHECK_BATCH_SIZE = 100          # sites queued per batch for /site and /addsite
 SITE_CHECK_MAX_CONCURRENT = 100     # total parallel site probes (50 per API × 2)
 
 # ─── Permanent site failure tracking ────────────────────────────────────
@@ -4099,7 +4099,7 @@ async def add_proxy_command(event):
 
         alive_proxies = []
         dead_proxies = []
-        batch_size = 20
+        batch_size = 50
         for i in range(0, len(new_proxies), batch_size):
             batch = new_proxies[i:i + batch_size]
             results = await asyncio.gather(*[test_proxy(p) for p in batch])
