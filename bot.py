@@ -792,7 +792,7 @@ def premium_emoji(text):
 # Bot Configuration (set API_ID, API_HASH, BOT_TOKEN in Render env / .env locally)
 API_ID = int(os.environ.get('API_ID', '6'))
 API_HASH = os.environ.get('API_HASH', 'eb06d4abfb49dc3eeb1aeb98ae0f581e')
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '6786903869:AAF_oe8zMR3-TSSOpekOCZmChyQdKNDRRUE')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8878133034:AAFXrLrL-NVERISqhgRiXNCdg2j0YHUza_A')
 
 # Owner IDs — only these users can use /pr, /kick, /genkey, /ap
 OWNERS = {5439878112, 6021047784}
