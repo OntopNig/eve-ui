@@ -75,10 +75,17 @@ def bot_by_html() -> str:
 
 
 # ─── Global sites + Evelyn UI ───────────────────────────────────────────
-GLOBAL_SITES_FILE = os.path.join(_BOT_DIR_EARLY, "global_sites.json")
+GLOBAL_SITES_FILE = os.path.join(_DATA_DIR, "global_sites.json")
+_legacy_global_sites = os.path.join(_BOT_DIR_EARLY, "global_sites.json")
+if not os.path.isfile(GLOBAL_SITES_FILE) and os.path.isfile(_legacy_global_sites):
+    try:
+        import shutil
+        shutil.copy2(_legacy_global_sites, GLOBAL_SITES_FILE)
+    except Exception:
+        pass
 GLOBAL_MIN_PRICE = 0.01
 GLOBAL_MAX_PRICE = 20.0
-SITE_CHECK_BATCH_SIZE = 100          # sites queued per batch for /site and /addsite
+SITE_CHECK_BATCH_SIZE = 50          # sites queued per batch for /site and /addsite
 SITE_CHECK_MAX_CONCURRENT = 100     # total parallel site probes (50 per API × 2)
 
 # ─── Permanent site failure tracking ────────────────────────────────────
@@ -792,7 +799,7 @@ def premium_emoji(text):
 # Bot Configuration (set API_ID, API_HASH, BOT_TOKEN in Render env / .env locally)
 API_ID = int(os.environ.get('API_ID', '6'))
 API_HASH = os.environ.get('API_HASH', 'eb06d4abfb49dc3eeb1aeb98ae0f581e')
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8878133034:AAFXrLrL-NVERISqhgRiXNCdg2j0YHUza_A')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '6786903869:AAF_oe8zMR3-TSSOpekOCZmChyQdKNDRRUE')
 
 # Owner IDs — only these users can use /pr, /kick, /genkey, /ap
 OWNERS = {5439878112, 6021047784}
@@ -3357,6 +3364,16 @@ def _is_valid_proxy_format(proxy: str) -> bool:
             return False
     return True
 
+_proxy_check_session = None
+
+def get_proxy_check_session():
+    global _proxy_check_session
+    if _proxy_check_session is None or _proxy_check_session.closed:
+        timeout = aiohttp.ClientTimeout(total=15)
+        connector = aiohttp.TCPConnector(limit=500)
+        _proxy_check_session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+    return _proxy_check_session
+
 async def test_proxy(proxy):
     """Test a single proxy via Hunter proxy checker API."""
     proxy = (proxy or "").strip()
@@ -3364,12 +3381,11 @@ async def test_proxy(proxy):
         return {'proxy': proxy, 'status': 'dead'}
     try:
         url = f"{PROXY_CHECK_API_URL}?data={quote(proxy, safe='')}"
-        timeout = aiohttp.ClientTimeout(total=45)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    return {'proxy': proxy, 'status': 'dead'}
-                raw = await resp.json(content_type=None)
+        session = get_proxy_check_session()
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return {'proxy': proxy, 'status': 'dead'}
+            raw = await resp.json(content_type=None)
         if not isinstance(raw, dict):
             return {'proxy': proxy, 'status': 'dead'}
         if (raw.get('status') or '').lower() != 'live':
@@ -4099,7 +4115,7 @@ async def add_proxy_command(event):
 
         alive_proxies = []
         dead_proxies = []
-        batch_size = 50
+        batch_size = 20
         for i in range(0, len(new_proxies), batch_size):
             batch = new_proxies[i:i + batch_size]
             results = await asyncio.gather(*[test_proxy(p) for p in batch])
