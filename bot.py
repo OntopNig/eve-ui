@@ -80,6 +80,18 @@ GLOBAL_MIN_PRICE = 0.01
 GLOBAL_MAX_PRICE = 20.0
 SITE_CHECK_BATCH_SIZE = 50          # sites queued per batch for /site and /addsite
 SITE_CHECK_MAX_CONCURRENT = 100     # total parallel site probes (50 per API × 2)
+
+# ─── Permanent site failure tracking ────────────────────────────────────
+SITE_FAIL_THRESHOLD = 3              # remove site after this many permanent fails
+_site_fail_tracker = {}              # {site_url: {'count': N, 'errors': []}}
+_PERMANENT_SITE_ERRORS = [
+    'amount_too_small', 'amount too small',
+    'no products', 'no valid products', 'no valid product',
+    'checkout disabled', 'checkout_disabled',
+    'product not found', 'failed to detect product',
+    'payments_positive_amount_expected', 'positive_amount_expected',
+    'positive amount expected', 'price: $0.00',
+]
 SITE_CHECK_PER_API = 50             # cap per checker API during /site and /addsite
 SH_MAX_PRICE = 10.0
 FREE_CARD_LIMIT = 500
@@ -137,6 +149,49 @@ def load_global_sites():
 def save_global_sites(sites):
     with open(GLOBAL_SITES_FILE, "w", encoding="utf-8") as f:
         json.dump(sites or [], f, indent=2, ensure_ascii=False)
+
+
+def _is_permanent_site_error(msg):
+    """Check if error indicates a permanent site problem (won't change with different cards)."""
+    msg_lower = str(msg or '').lower()
+    return any(err in msg_lower for err in _PERMANENT_SITE_ERRORS)
+
+
+def track_site_permanent_fail(site, error_msg):
+    """Track repeated site failures. Remove from global_sites.json after SITE_FAIL_THRESHOLD fails."""
+    if not site or not _is_permanent_site_error(error_msg):
+        return False
+    site_key = site.lower().rstrip('/')
+    if site_key not in _site_fail_tracker:
+        _site_fail_tracker[site_key] = {'count': 0, 'errors': []}
+    _site_fail_tracker[site_key]['count'] += 1
+    _site_fail_tracker[site_key]['errors'].append(str(error_msg)[:100])
+
+    if _site_fail_tracker[site_key]['count'] >= SITE_FAIL_THRESHOLD:
+        # Remove from global_sites.json permanently
+        sites = load_global_sites()
+        updated = [s for s in sites if str(s.get('url', '')).lower().rstrip('/') != site_key]
+        if len(updated) < len(sites):
+            save_global_sites(updated)
+            print(f"[SITE REMOVED] {site} — {SITE_FAIL_THRESHOLD} permanent fails: {_site_fail_tracker[site_key]['errors'][-1]}")
+        _site_fail_tracker.pop(site_key, None)
+        return True
+    return False
+
+
+def _is_rate_limited_msg(msg):
+    """Check if the response indicates HTTP 429 rate limiting."""
+    msg_lower = str(msg or '').lower()
+    return any(kw in msg_lower for kw in (
+        '429', 'too many requests', 'rate_limited', 'rate limited',
+        'httperror429', 'http_429', 'throttled',
+    ))
+
+
+def _is_generic_error_msg(msg):
+    """Check if the response is a generic error that might resolve on retry."""
+    msg_lower = str(msg or '').lower()
+    return 'generic_error' in msg_lower or 'generic error' in msg_lower
 
 
 def migrate_plain_sites_txt(sites_file="sites.txt"):
@@ -658,7 +713,7 @@ def build_chk_progress_text(results, range_label=None):
 # Premium Custom Emoji IDs (bot must be created with Telegram Premium account)
 # Use @RawDataBot to get custom_emoji_id for any premium emoji
 PREMIUM_EMOJI_IDS = {
-    "✅": "6023660820544623088",
+    "✅": "6088893844693195262",
     "🔥": "6181540309357305513",
     "❌": "6037570896766438989",
     "⚡": "5445388803223091254",
@@ -673,15 +728,17 @@ PREMIUM_EMOJI_IDS = {
     "⏸️": "6001440193058444284",
     "▶️": "6285315214673975495",
     "🛑": "5420323339723881652",
-    "📊": "5445146408153806223",
+    "📊": "5231200819986047254",
     "📦": "6066395745139824604",
-    "📋": "5974235702701853774",
+    "📋": "5445260044398524944",
     "🔄": "5971837723676249096",
-    "⏳": "5971837723676249096",
+    "⏳": "5454415424319931791",
+    "⌛️": "5454415424319931791",
+    "⌛": "5454415424319931791",
     "⏰": "5445350406215465190",
-    "🚀": "6282977077427702833",
+    "🚀": "5372917041193828849",
     "⚠️": "5447381715293074599",
-    "💎": "6023660820544623088",
+    "💎": "5364040533498932357",
     "🤍": "5764979527331615949",
     "😀": "5303438381743618017",
     "🛒": "5447319442562251569",
@@ -695,6 +752,9 @@ PREMIUM_EMOJI_IDS = {
     "ℹ️": "5247029067256987229",
     "ℹ": "5247029067256987229",
     "📲": "5447332224384925505",
+    "🤯": "5963085452205362622",
+    "📅": "5800810214689084012",
+    "🎁": "6089193719309801680",
 }
 
 def premium_emoji(text):
@@ -732,7 +792,7 @@ def premium_emoji(text):
 # Bot Configuration (set API_ID, API_HASH, BOT_TOKEN in Render env / .env locally)
 API_ID = int(os.environ.get('API_ID', '6'))
 API_HASH = os.environ.get('API_HASH', 'eb06d4abfb49dc3eeb1aeb98ae0f581e')
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8878133034:AAFXrLrL-NVERISqhgRiXNCdg2j0YHUza_A')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '6786903869:AAF_oe8zMR3-TSSOpekOCZmChyQdKNDRRUE')
 
 # Owner IDs — only these users can use /pr, /kick, /genkey, /ap
 OWNERS = {5439878112, 6021047784}
@@ -872,10 +932,10 @@ class CheckerApiManager:
 
     def workers_summary_text(self):
         if not self._apis:
-            return '**0** API workers (none enabled)'
-        parts = [f"`{a['id']}`: {int(a.get('max_workers', 15))}" for a in self._apis]
+            return '<b>0</b> API workers (none enabled)'
+        parts = [f"<code>{a['id']}</code>: {int(a.get('max_workers', 15))}" for a in self._apis]
         total = self.total_workers()
-        return f"**{total}** API workers ({' + '.join(parts)})"
+        return f"<b>{total}</b> API workers ({', '.join(parts)})"
 
     def pick_api_id(self, exclude=None):
         """Round-robin API pick; exclude= last api_id to force switch on retry."""
@@ -2619,7 +2679,14 @@ def _pick_chk_site(sites, used_sites, bad_sites):
 
 
 async def check_card_with_retry(card, sites, proxies, max_retries=3, bad_sites=None, *, bypass_user_pool=False):
-    """Check a card with automatic retry, tracking bad sites"""
+    """Check a card with automatic retry, tracking bad sites.
+    Features:
+    - Basic retry with site/proxy/API rotation
+    - Dedicated 429 handling (3 retries + 1.5s delay)
+    - Generic error handling (2 retries + 1.0s delay)
+    - Smart retry on Unknown gateway / $0.00 price
+    - Permanent site removal after repeated failures
+    """
     last_result = None
     if not sites:
         return {'status': 'Dead', 'message': 'No sites available', 'card': card, 'gateway': 'Unknown', 'price': '-'}
@@ -2632,7 +2699,11 @@ async def check_card_with_retry(card, sites, proxies, max_retries=3, bad_sites=N
     last_site = None
     retry_delay = 0.1 if bypass_user_pool else 0.3
     mgr = get_checker_manager()
+
+    # ========== MAIN RETRY LOOP ==========
     for attempt in range(max_retries):
+        generic_error_retries = 0
+
         site = _pick_chk_site(sites, used_sites, bad_sites)
         used_sites.add(site)
         last_site = site
@@ -2648,6 +2719,96 @@ async def check_card_with_retry(card, sites, proxies, max_retries=3, bad_sites=N
         if not result.get('site'):
             result['site'] = site
 
+        # Track permanent site failures
+        if result.get('retry'):
+            track_site_permanent_fail(site, result.get('message', ''))
+
+        # ========== HTTP 429 HANDLING ==========
+        if _is_rate_limited_msg(result.get('message', '')):
+            max_429_retries = 3
+            for _ in range(max_429_retries):
+                await asyncio.sleep(1.5)  # Give Shopify time to cool down
+
+                # Ban current site for session
+                if bad_sites is not None and _should_session_ban_site(result.get('message', '')):
+                    bad_sites.add(site)
+
+                # Rotate proxy
+                available_px = [p for p in proxies if p not in used_proxies] or list(proxies)
+                proxy = random.choice(available_px)
+                used_proxies.add(proxy)
+
+                # Rotate site
+                site = _pick_chk_site(sites, used_sites, bad_sites)
+                used_sites.add(site)
+
+                # Rotate API
+                api_id = mgr.pick_api_id(exclude=last_api_id)
+                last_api_id = api_id
+
+                result = await check_card(
+                    card, site, proxy, bypass_user_pool=bypass_user_pool, api_id=api_id,
+                )
+                if not result.get('site'):
+                    result['site'] = site
+                if result.get('retry'):
+                    track_site_permanent_fail(site, result.get('message', ''))
+                if not _is_rate_limited_msg(result.get('message', '')):
+                    break  # 429 resolved
+
+            if _is_rate_limited_msg(result.get('message', '')):
+                last_result = result
+                break  # All 429 retries exhausted
+            if not result.get('retry'):
+                if result['status'] == 'Charged':
+                    return result
+                if is_live_hit_result(result):
+                    return _as_approved_result(result)
+
+        # ========== GENERIC ERROR HANDLING ==========
+        if result.get('retry') and _is_generic_error_msg(result.get('message', '')):
+            max_generic_retries = 2
+            while generic_error_retries < max_generic_retries:
+                generic_error_retries += 1
+                await asyncio.sleep(1.0)
+
+                # Rotate site
+                site = _pick_chk_site(sites, used_sites, bad_sites)
+                used_sites.add(site)
+
+                # Rotate proxy
+                available_px = [p for p in proxies if p not in used_proxies] or list(proxies)
+                proxy = random.choice(available_px)
+                used_proxies.add(proxy)
+
+                # Rotate API
+                api_id = mgr.pick_api_id(exclude=last_api_id)
+                last_api_id = api_id
+
+                result = await check_card(
+                    card, site, proxy, bypass_user_pool=bypass_user_pool, api_id=api_id,
+                )
+                if not result.get('site'):
+                    result['site'] = site
+                if result.get('retry'):
+                    track_site_permanent_fail(site, result.get('message', ''))
+                if not result.get('retry'):
+                    break  # Success!
+                if not _is_generic_error_msg(result.get('message', '')):
+                    break  # Different error, let outer loop handle
+
+            if not result.get('retry'):
+                if result['status'] == 'Charged':
+                    return result
+                if is_live_hit_result(result):
+                    return _as_approved_result(result)
+            else:
+                if bad_sites is not None and _should_session_ban_site(result.get('message', '')):
+                    bad_sites.add(site)
+                last_result = result
+                continue  # Try next main attempt
+
+        # ========== SUCCESS CHECK ==========
         if not result.get('retry'):
             if result['status'] == 'Charged':
                 return result
@@ -2672,7 +2833,7 @@ async def check_card_with_retry(card, sites, proxies, max_retries=3, bad_sites=N
             await asyncio.sleep(retry_delay * 2)
             continue
 
-        # Site gave error — ban truly dead shops for this session (not API infra)
+        # ========== PROXY ROTATION FOR NEXT ATTEMPT ==========
         if bad_sites is not None and _should_session_ban_site(result.get('message', '')):
             bad_sites.add(site)
 
@@ -2682,6 +2843,7 @@ async def check_card_with_retry(card, sites, proxies, max_retries=3, bad_sites=N
             delay = 0.05 if ('request timeout' in msg_low or 'timed out' in msg_low) else retry_delay
             await asyncio.sleep(delay)
 
+    # ========== FINAL RESULT ==========
     if last_result:
         if is_live_hit_result(last_result):
             return _as_approved_result(last_result)
@@ -4758,9 +4920,9 @@ async def add_premium_days(event):
     await event.reply(
         premium_emoji(
             f"✅ <b>Premium granted</b>\n"
-            f"👤 User: <code>{uid}</code>\n"
+            f"🤯 User: <code>{uid}</code>\n"
             f"💎 Tier: <b>{final_meta['label']}</b> ({new_limit:,} cards/chk)\n"
-            f"⏳ Days: <b>{days}</b>\n"
+            f"⌛️ Days: <b>{days}</b>\n"
             f"📅 Expires: <b>{exp_label}</b>"
         ),
         parse_mode='html',
@@ -4867,7 +5029,7 @@ async def gen_key_cmd(event):
     body = "\n".join(k for k in new_keys)
     await event.reply(
         premium_emoji(
-            f"🔑 <b>Generated {count} {tier_meta['label']} key(s)</b>\n"
+            f"🎁 <b>Generated {count} {tier_meta['label']} key(s)</b>\n"
             f"💳 Limit: <b>{tier_meta['limit']:,}</b> cards/chk · {days} day(s) each\n\n"
             f"<pre>{body}</pre>\n\n"
             f"Redeem: <code>/redeem KEY</code> or reply to this message with <code>/redeem</code>"
@@ -5176,12 +5338,12 @@ async def workers_handler(event):
     pending = _total_pending()
     active_users = len(active_chk_users)
     text = premium_emoji(
-        f'<b>📊 Worker status</b> (Evelyn pool)\n\n'
-        f'🚀 Dispatch pool: <b>{pool_workers}</b> workers (target <b>{get_dispatch_soft_cap()}</b>)\n'
-        f'📋 Pending jobs: <b>{pending}</b>\n'
-        f'👥 Active /chk users: <b>{active_users}</b>\n'
-        f'⚡ {mgr.workers_summary_text()}\n'
-        f'\n<i>/apiworkers api1 150 · /apiworkers all 150 · /dispatchworkers auto</i>'
+        f'📊 Worker status (Evelyn pool)\n\n'
+        f'🚀 Dispatch pool: {pool_workers} workers (target {get_dispatch_soft_cap()})\n'
+        f'📋 Pending jobs: {pending}\n'
+        f'📋 Active /chk users: {active_users}\n'
+        f'⚡️ {mgr.workers_summary_text()}\n\n'
+        f'/apiworkers api1 150 · /apiworkers all 150 · /dispatchworkers auto'
     )
     await event.reply(text, parse_mode='html')
 
